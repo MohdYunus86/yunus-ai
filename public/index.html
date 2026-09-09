@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yunus AI</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f7fb; color: #1f2937; }
+    .wrap { max-width: 980px; margin: 20px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 12px; }
+    h1, h2 { margin: 0 0 10px; }
+    textarea, input, button, select { width: 100%; padding: 10px; margin-top: 6px; margin-bottom: 8px; box-sizing: border-box; }
+    button { cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 8px; }
+    .row { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 900px) { .row { grid-template-columns: 1fr 1fr; } }
+    pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; padding: 10px; border-radius: 8px; }
+    .status { font-size: 14px; color: #334155; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 id="appTitle">Yunus AI</h1>
+      <div class="status" id="status">Semak status...</div>
+    </div>
+
+    <div class="card">
+      <h2>Tetapan Identiti App</h2>
+      <label>Nama App</label>
+      <input id="identityApp" placeholder="Contoh: Yunus AI Studio" />
+      <label>Nama Anda</label>
+      <input id="identityUser" placeholder="Contoh: Yunus" />
+      <button id="saveIdentity">Simpan Identiti</button>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h2>Chat</h2>
+        <textarea id="chatInput" rows="3" placeholder="Tanya apa-apa..."></textarea>
+        <button id="sendChat">Hantar Chat</button>
+        <pre id="chatOutput"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Pembantu Penulisan</h2>
+        <textarea id="writeInput" rows="6" placeholder="Masukkan draf atau idea anda..."></textarea>
+        <button id="runWriting">Bantu Tulis</button>
+        <pre id="writeOutput"></pre>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h2>Perumus Dokumen</h2>
+        <textarea id="sumInput" rows="6" placeholder="Tampal teks dokumen..."></textarea>
+        <input id="sumFile" type="file" accept=".txt,text/plain" />
+        <button id="runSummary">Ringkaskan</button>
+        <pre id="sumOutput"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Penjana Idea</h2>
+        <input id="ideasInput" placeholder="Topik idea (contoh: bisnes kopi)" />
+        <button id="runIdeas">Jana Idea</button>
+        <pre id="ideasOutput"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Penjana Prompt Imej</h2>
+      <input id="imageInput" placeholder="Konsep imej (contoh: bandar cyberpunk hujan malam)" />
+      <button id="runImagePrompt">Jana Prompt Imej</button>
+      <pre id="imageOutput"></pre>
+      <button id="speakBtn">Baca Output Terakhir (Suara Browser)</button>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const appTitle = document.getElementById('appTitle');
+    let lastOutput = '';
+
+    function setOutput(el, text) {
+      el.textContent = text;
+      lastOutput = text || lastOutput;
+    }
+
+    async function postJSON(url, payload) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return response.json();
+    }
+
+    async function refreshStatus() {
+      try {
+        const data = await fetch('/api/status').then((r) => r.json());
+        statusEl.textContent = data.message + ` | provider=${data.provider} model=${data.model}`;
+      } catch (e) {
+        statusEl.textContent = 'Gagal semak status backend.';
+      }
+    }
+
+    function loadIdentity() {
+      const identity = JSON.parse(localStorage.getItem('yunusIdentity') || '{}');
+      document.getElementById('identityApp').value = identity.app || 'Yunus AI';
+      document.getElementById('identityUser').value = identity.user || '';
+      appTitle.textContent = identity.app || 'Yunus AI';
+    }
+
+    document.getElementById('saveIdentity').addEventListener('click', () => {
+      const app = document.getElementById('identityApp').value.trim() || 'Yunus AI';
+      const user = document.getElementById('identityUser').value.trim();
+      localStorage.setItem('yunusIdentity', JSON.stringify({ app, user }));
+      appTitle.textContent = app;
+      alert('Identiti disimpan.');
+    });
+
+    document.getElementById('sendChat').addEventListener('click', async () => {
+      const text = document.getElementById('chatInput').value.trim();
+      const out = document.getElementById('chatOutput');
+      if (!text) return setOutput(out, 'Sila isi mesej chat.');
+      setOutput(out, 'Memproses...');
+      const data = await postJSON('/api/chat', { message: text });
+      setOutput(out, data.reply || data.error || 'Tiada respon.');
+    });
+
+    document.getElementById('runWriting').addEventListener('click', async () => {
+      const text = document.getElementById('writeInput').value;
+      const out = document.getElementById('writeOutput');
+      setOutput(out, 'Memproses...');
+      const data = await postJSON('/api/assist', { type: 'writing', input: text });
+      setOutput(out, data.result || data.error || 'Tiada respon.');
+    });
+
+    document.getElementById('runSummary').addEventListener('click', async () => {
+      const text = document.getElementById('sumInput').value;
+      const out = document.getElementById('sumOutput');
+      setOutput(out, 'Memproses...');
+      const data = await postJSON('/api/assist', { type: 'summarize', input: text });
+      setOutput(out, data.result || data.error || 'Tiada respon.');
+    });
+
+    document.getElementById('sumFile').addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      document.getElementById('sumInput').value = text;
+    });
+
+    document.getElementById('runIdeas').addEventListener('click', async () => {
+      const text = document.getElementById('ideasInput').value;
+      const out = document.getElementById('ideasOutput');
+      setOutput(out, 'Memproses...');
+      const data = await postJSON('/api/assist', { type: 'ideas', input: text });
+      setOutput(out, data.result || data.error || 'Tiada respon.');
+    });
+
+    document.getElementById('runImagePrompt').addEventListener('click', async () => {
+      const text = document.getElementById('imageInput').value;
+      const out = document.getElementById('imageOutput');
+      setOutput(out, 'Memproses...');
+      const data = await postJSON('/api/assist', { type: 'imagePrompt', input: text });
+      setOutput(out, data.result || data.error || 'Tiada respon.');
+    });
+
+    document.getElementById('speakBtn').addEventListener('click', () => {
+      if (!('speechSynthesis' in window)) return alert('Browser tidak sokong speech synthesis.');
+      const utterance = new SpeechSynthesisUtterance(lastOutput || 'Tiada output untuk dibaca.');
+      utterance.lang = 'ms-MY';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    });
+
+    loadIdentity();
+    refreshStatus();
+  </script>
+</body>
+</html>
