@@ -207,10 +207,6 @@ app.post('/api/assist', async (req, res) => {
   return res.json({ ok: true, result: response.text, meta: response });
 });
 
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
 app.listen(PORT, () => {
   console.log(`Yunus AI berjalan di http://localhost:${PORT}`);
 });
