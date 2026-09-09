@@ -1,0 +1,23 @@
+{
+  "name": "yunus-ai",
+  "version": "1.0.0",
+  "description": "Yunus AI - AI Melayu sebenar dengan frontend dan backend runnable",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "ai",
+    "malay",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}
