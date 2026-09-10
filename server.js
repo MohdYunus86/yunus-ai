@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs/promises');
 const express = require('express');
 const dotenv = require('dotenv');
 
@@ -6,9 +7,69 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+const STORAGE_DIR = path.join(__dirname, 'storage');
+const PREMIUM_VIDEO_FILE = path.join(STORAGE_DIR, 'premium-videos.json');
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+async function readPremiumVideos() {
+  await fs.mkdir(STORAGE_DIR, { recursive: true });
+  try {
+    const raw = await fs.readFile(PREMIUM_VIDEO_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      await fs.writeFile(PREMIUM_VIDEO_FILE, '[]\n', 'utf8');
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writePremiumVideos(videos) {
+  await fs.mkdir(STORAGE_DIR, { recursive: true });
+  await fs.writeFile(PREMIUM_VIDEO_FILE, `${JSON.stringify(videos, null, 2)}\n`, 'utf8');
+}
+
+function validatePremiumVideoPayload(payload) {
+  const title = (payload?.title || '').toString().trim();
+  const url = (payload?.url || '').toString().trim();
+  const description = (payload?.description || '').toString().trim();
+
+  if (!title || title.length > 120) {
+    return { ok: false, error: 'title wajib dan maksimum 120 aksara.' };
+  }
+
+  if (!url || url.length > 2048) {
+    return { ok: false, error: 'url wajib dan maksimum 2048 aksara.' };
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch (error) {
+    return { ok: false, error: 'url tidak sah.' };
+  }
+
+  if (parsedUrl.protocol !== 'https:') {
+    return { ok: false, error: 'url mesti bermula dengan https://.' };
+  }
+
+  if (description.length > 300) {
+    return { ok: false, error: 'description maksimum 300 aksara.' };
+  }
+
+  return { ok: true, title, url: parsedUrl.toString(), description };
+}
+
+function hasAdminAccess(req) {
+  if (!ADMIN_TOKEN) return false;
+  const provided = (req.headers['x-admin-token'] || '').toString();
+  return provided && provided === ADMIN_TOKEN;
+}
 
 function getConfig() {
   const provider = (process.env.AI_PROVIDER || 'auto').toLowerCase();
@@ -205,6 +266,44 @@ app.post('/api/assist', async (req, res) => {
 
   const response = await generateResponse(type, input, extra);
   return res.json({ ok: true, result: response.text, meta: response });
+});
+
+app.get('/api/premium/videos', async (req, res) => {
+  try {
+    const videos = await readPremiumVideos();
+    return res.json({ ok: true, videos });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: 'Gagal membaca senarai video premium.' });
+  }
+});
+
+app.post('/api/premium/videos', async (req, res) => {
+  if (!hasAdminAccess(req)) {
+    return res.status(401).json({ ok: false, error: 'Akses admin diperlukan.' });
+  }
+
+  const validation = validatePremiumVideoPayload(req.body);
+  if (!validation.ok) {
+    return res.status(400).json({ ok: false, error: validation.error });
+  }
+
+  try {
+    const videos = await readPremiumVideos();
+    const record = {
+      id: `vid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      title: validation.title,
+      url: validation.url,
+      description: validation.description,
+      createdAt: new Date().toISOString()
+    };
+
+    videos.push(record);
+    await writePremiumVideos(videos);
+
+    return res.status(201).json({ ok: true, video: record });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: 'Gagal menyimpan video premium.' });
+  }
 });
 
 app.listen(PORT, () => {

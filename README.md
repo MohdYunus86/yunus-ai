@@ -40,6 +40,15 @@ Buka browser di `http://localhost:3000`.
   - `{ "type": "summarize", "input": "..." }`
   - `{ "type": "ideas", "input": "..." }`
   - `{ "type": "imagePrompt", "input": "..." }`
+- `GET /api/premium/videos` → senarai URL video premium dari backend storage
+- `POST /api/premium/videos` (admin) dengan header `x-admin-token` dan body:
+  - `{ "title": "Nama video", "url": "https://...", "description": "Opsyenal" }`
 
 ## Fallback tanpa API key
 Jika API key tidak diisi, aplikasi tetap boleh dibuka dan fungsi backend akan guna fallback response dengan mesej status yang jelas.
+
+## Kandungan Premium (URL sendiri)
+- Simpan URL video premium di `/storage/premium-videos.json`.
+- Gunakan endpoint `POST /api/premium/videos` untuk menambah rekod baru.
+- Tetapkan `ADMIN_TOKEN` dalam fail `.env`, kemudian hantar token itu melalui header `x-admin-token`.
+- Pastikan anda hanya meletakkan URL video yang anda memiliki hak edaran.
