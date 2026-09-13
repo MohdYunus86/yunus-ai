@@ -1,1 +1,0 @@
-console.log(`APK build note:\nEnvironment ini tiada Android SDK/Gradle, jadi APK sebenar tidak boleh dibina di sini.\nApp sudah PWA-ready. Deploy ke HTTPS dan generate APK melalui PWABuilder/Bubblewrap atau Android Studio.`);
