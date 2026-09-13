@@ -173,14 +173,15 @@ function draftFromPrompt(prompt) {
 function serveStatic(req, res) {
   let filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
   if (filePath === '/') filePath = '/index.html';
-  filePath = path.normalize(filePath).replace(/^([.][.][\/\\])+/, '');
-  const full = path.join(FRONTEND, filePath);
-  if (!full.startsWith(FRONTEND)) {
+  filePath = path.normalize(filePath).replace(/^[/\\]+/, '');
+  const frontendRoot = path.resolve(FRONTEND);
+  const full = path.resolve(frontendRoot, filePath);
+  if (!full.startsWith(`${frontendRoot}${path.sep}`) && full !== frontendRoot) {
     res.writeHead(403); return res.end('Forbidden');
   }
   fs.readFile(full, (err, content) => {
     if (err) {
-      fs.readFile(path.join(FRONTEND, 'index.html'), (e, html) => {
+      fs.readFile(path.resolve(frontendRoot, 'index.html'), (e, html) => {
         if (e) { res.writeHead(404); res.end('Not found'); }
         else { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); }
       });
