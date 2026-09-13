@@ -1,0 +1,19 @@
+{
+  "name": "yunus-ai",
+  "version": "1.0.0",
+  "description": "Yunus AI - AI Melayu sebenar dengan frontend, backend dan PWA/Android wrapper",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js",
+    "check": "node scripts/check.js",
+    "apk:prepare": "node scripts/prepare-apk.js",
+    "apk:note": "node scripts/apk-note.js"
+  },
+  "keywords": ["ai", "malay", "melayu", "chatbot", "pwa", "android"],
+  "author": "Yunus AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
