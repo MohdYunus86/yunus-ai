@@ -16,7 +16,7 @@ function add(role, text){
 }
 function render(){ chat.innerHTML=''; if(!history.length){ add('ai','Assalamualaikum. Saya Yunus AI. Tanya apa sahaja dalam Bahasa Melayu — saya sedia membantu.'); } history.forEach(m=>add(m.role,m.content)); }
 async function health(){
-  try{ const r=await fetch('/api/health'); const j=await r.json(); statusEl.textContent = j.ok ? 'Online • ' + j.mode : 'Error'; statusEl.className='status ok'; }
+  try{ const r=await fetch('/api/health'); const j=await r.json(); statusEl.textContent = j.ok ? 'Online • ' + j.mode : 'Error'; statusEl.className=j.ok ? 'status ok' : 'status bad'; }
   catch{ statusEl.textContent='Offline'; statusEl.className='status bad'; }
 }
 async function send(message){

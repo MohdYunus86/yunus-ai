@@ -26,12 +26,7 @@ const mime = {
 };
 
 function json(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-  });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data, null, 2));
 }
 
@@ -57,11 +52,15 @@ function loadMemory() {
   catch { return { conversations: [] }; }
 }
 
+let conversationWriteQueue = Promise.resolve();
 function saveConversation(item) {
-  const mem = loadMemory();
-  mem.conversations.unshift(item);
-  mem.conversations = mem.conversations.slice(0, 200);
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2));
+  conversationWriteQueue = conversationWriteQueue.then(() => {
+    const mem = loadMemory();
+    mem.conversations.unshift(item);
+    mem.conversations = mem.conversations.slice(0, 200);
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2));
+  });
+  return conversationWriteQueue;
 }
 
 const intents = [
@@ -171,7 +170,14 @@ function draftFromPrompt(prompt) {
 }
 
 function serveStatic(req, res) {
-  let filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+  let filePath;
+  try {
+    filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad request');
+    return;
+  }
   if (filePath === '/') filePath = '/index.html';
   filePath = path.normalize(filePath).replace(/^[/\\]+/, '');
   const frontendRoot = path.resolve(FRONTEND);
@@ -223,7 +229,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (!reply) reply = generateMalayAI(message, history);
       const item = { id: crypto.randomUUID(), message, reply, mode, createdAt: new Date().toISOString() };
-      saveConversation(item);
+      await saveConversation(item);
       return json(res, 200, { ok: true, reply, mode, conversation: item });
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });
