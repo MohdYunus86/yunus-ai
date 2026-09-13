@@ -1,0 +1,2 @@
+cd yunus-ai
+ls
