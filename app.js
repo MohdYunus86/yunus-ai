@@ -31,7 +31,7 @@ async function send(message){
     thinking.remove();
     if(!j.ok) throw new Error(j.error || 'Ralat tidak diketahui');
     history.push({role:'ai',content:j.reply}); save(); add('ai', j.reply);
-  }catch(e){ thinking.remove(); add('ai','Maaf, berlaku ralat: '+e.message); }
+  }catch(e){ thinking.remove(); const errorMsg='Maaf, berlaku ralat: '+e.message; history.push({role:'ai',content:errorMsg}); save(); add('ai',errorMsg); }
 }
 form.addEventListener('submit', e=>{ e.preventDefault(); const msg=input.value.trim(); if(!msg) return; input.value=''; input.style.height='46px'; send(msg); });
 input.addEventListener('input', ()=>{ input.style.height='46px'; input.style.height=Math.min(input.scrollHeight,160)+'px'; });
