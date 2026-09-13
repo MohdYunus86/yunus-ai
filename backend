@@ -1,0 +1,236 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
+const ROOT = path.join(__dirname, '..');
+const FRONTEND = path.join(ROOT, 'frontend');
+const DATA_DIR = path.join(ROOT, 'data');
+const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(MEMORY_FILE)) fs.writeFileSync(MEMORY_FILE, JSON.stringify({ conversations: [] }, null, 2));
+
+const mime = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json; charset=utf-8'
+};
+
+function json(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+  });
+  res.end(JSON.stringify(data, null, 2));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1_000_000) {
+        req.destroy();
+        reject(new Error('Payload terlalu besar'));
+      }
+    });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch { reject(new Error('JSON tidak sah')); }
+    });
+  });
+}
+
+function loadMemory() {
+  try { return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8')); }
+  catch { return { conversations: [] }; }
+}
+
+function saveConversation(item) {
+  const mem = loadMemory();
+  mem.conversations.unshift(item);
+  mem.conversations = mem.conversations.slice(0, 200);
+  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2));
+}
+
+const intents = [
+  {
+    name: 'salam',
+    patterns: [/\b(hi|hai|hello|helo|assalamualaikum|salam)\b/i],
+    reply: () => 'Waalaikumussalam dan hai! Saya Yunus AI, pembantu AI Melayu. Tanya apa sahaja — saya boleh bantu jawab, karang teks, bagi idea, buat ringkasan dan bantu coding.'
+  },
+  {
+    name: 'siapa',
+    patterns: [/siapa (awak|kamu|kau)|nama awak|apa itu yunus ai/i],
+    reply: () => 'Saya Yunus AI — AI Melayu yang direka untuk berbual dalam Bahasa Melayu dengan gaya mudah, sopan dan terus kepada jawapan.'
+  },
+  {
+    name: 'terima kasih',
+    patterns: [/terima kasih|thanks|tq|makasih/i],
+    reply: () => 'Sama-sama. Kalau ada lagi yang mahu dibuat, beritahu sahaja.'
+  },
+  {
+    name: 'pantun',
+    patterns: [/pantun/i],
+    reply: () => 'Pergi ke pekan membeli kari,\nSinggah sebentar di tepi titi;\nYunus AI sedia membantu hari-hari,\nBahasa Melayu dekat di hati.'
+  },
+  {
+    name: 'gambar',
+    patterns: [/buat gambar|hasilkan gambar|generate image|lukis|draw|image/i],
+    reply: (msg) => `Saya faham anda mahu buat gambar. Mode offline APK tidak boleh menjana imej sebenar, tetapi saya boleh buat prompt imej yang kemas.\n\nPrompt cadangan:\n"Ilustrasi moden bertema Melayu futuristik untuk ${msg.replace(/buat gambar|hasilkan gambar|generate image|lukis|draw|image/ig, '').trim() || 'Yunus AI'}, pencahayaan dramatik, warna teal dan emas, gaya profesional, resolusi tinggi, komposisi kemas."\n\nUntuk jana gambar sebenar seperti ChatGPT, sambungkan Yunus AI kepada backend yang ada image API.`
+  },
+  {
+    name: 'coding',
+    patterns: [/\b(code|coding|javascript|python|html|css|node|react|api|backend|frontend)\b/i],
+    reply: (msg) => `Baik. Untuk tugasan coding ini, saya cadangkan kita pecahkan kepada langkah:\n\n1. Tetapkan fungsi utama yang diperlukan.\n2. Bina struktur fail yang kemas.\n3. Tulis kod minimum yang boleh jalan dahulu.\n4. Uji, kemudian tambah ciri.\n\nPermintaan anda: "${msg}"\n\nJika anda mahu, saya boleh terus tulis contoh kod lengkap.`
+  },
+  {
+    name: 'ringkasan',
+    patterns: [/ringkas|summary|rumus|kesimpulan/i],
+    reply: (msg) => summarize(msg)
+  }
+];
+
+function summarize(text) {
+  const cleaned = text.replace(/^(tolong|boleh|sila)?\s*(ringkas|summary|rumus|kesimpulan)\s*/i, '').trim();
+  if (!cleaned || cleaned.length < 40) return 'Boleh. Berikan teks yang mahu diringkaskan, dan saya akan jadikan ringkasan yang padat.';
+  const sentences = cleaned.match(/[^.!?。？！]+[.!?。？！]?/g) || [cleaned];
+  return 'Ringkasan: ' + sentences.slice(0, 3).map(s => s.trim()).filter(Boolean).join(' ');
+}
+
+
+async function callExternalLLM(message, history = []) {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
+  if (!apiKey) return null;
+  const baseURL = (process.env.OPENAI_BASE_URL || process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const model = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
+  const messages = [
+    {
+      role: 'system',
+      content: 'Anda ialah Yunus AI, pembantu AI Melayu yang bijak seperti ChatGPT. Jawab dalam Bahasa Melayu yang natural, tepat, sopan dan praktikal. Jika pengguna minta gambar, hasilkan prompt imej yang lengkap atau jelaskan bahawa penjanaan imej memerlukan image API. Jangan mengaku ada kemampuan yang tidak tersedia.'
+    },
+    ...history.slice(-12).filter(m => m && m.content).map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) })),
+    { role: 'user', content: String(message).slice(0, 8000) }
+  ];
+
+  const response = await fetch(`${baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7 })
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`LLM error ${response.status}: ${text.slice(0, 300)}`);
+  }
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || null;
+}
+
+function generateMalayAI(message, history = []) {
+  const msg = String(message || '').trim();
+  if (!msg) return 'Sila taip soalan atau arahan anda.';
+
+  for (const intent of intents) {
+    if (intent.patterns.some(p => p.test(msg))) return intent.reply(msg, history);
+  }
+
+  if (/buat|karang|tulis|hasilkan/i.test(msg)) {
+    return `Baik, saya boleh bantu hasilkan kandungan itu.\n\nDraf cadangan:\n\n${draftFromPrompt(msg)}\n\nJika mahu, saya boleh ubah gaya kepada lebih formal, santai, promosi, atau profesional.`;
+  }
+
+  if (/idea|cadangan|plan|rancang/i.test(msg)) {
+    return `Ini beberapa cadangan untuk "${msg}":\n\n1. Mula dengan versi kecil yang boleh diuji.\n2. Senaraikan keperluan utama dan buang ciri yang belum penting.\n3. Buat reka bentuk mudah tetapi konsisten.\n4. Uji dengan pengguna sebenar.\n5. Tambah baik berdasarkan maklum balas.\n\nKalau anda beri konteks lebih khusus, saya boleh susun pelan langkah demi langkah.`;
+  }
+
+  if (/apa|bagaimana|macam mana|kenapa|bila|di mana|berapa/i.test(msg)) {
+    return `Jawapan ringkas: saya faham anda bertanya tentang "${msg}".\n\nSecara umum, cara terbaik ialah kenal pasti objektif dahulu, kemudian pilih langkah paling mudah untuk mencapainya. Jika soalan ini berkaitan fakta semasa atau data khusus, sambungkan Yunus AI kepada API/LLM luar supaya jawapan lebih tepat.\n\nBerikan sedikit konteks tambahan dan saya akan jawab dengan lebih tepat.`;
+  }
+
+  return `Saya faham. Anda berkata: "${msg}".\n\nSebagai Yunus AI, saya boleh bantu dalam Bahasa Melayu untuk:\n- Menjawab soalan\n- Menulis karangan, caption, surat atau skrip\n- Membuat ringkasan\n- Memberi idea dan pelan kerja\n- Membantu coding frontend/backend\n\nApa hasil akhir yang anda mahu daripada mesej ini?`;
+}
+
+function draftFromPrompt(prompt) {
+  const p = prompt.replace(/^(tolong|sila|boleh)?\s*(buat|karang|tulis|hasilkan)\s*/i, '').trim();
+  return `Tajuk: ${p || 'Cadangan Kandungan'}\n\nPengenalan:\nPerkara ini penting kerana ia membantu menyampaikan maklumat dengan jelas dan mudah difahami.\n\nIsi utama:\nPertama, tentukan tujuan utama. Kedua, susun maklumat mengikut keutamaan. Ketiga, gunakan bahasa yang ringkas dan tepat.\n\nPenutup:\nDengan perancangan yang baik, hasilnya akan lebih kemas, berkesan dan sesuai untuk pembaca sasaran.`;
+}
+
+function serveStatic(req, res) {
+  let filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+  if (filePath === '/') filePath = '/index.html';
+  filePath = path.normalize(filePath).replace(/^([.][.][\/\\])+/, '');
+  const full = path.join(FRONTEND, filePath);
+  if (!full.startsWith(FRONTEND)) {
+    res.writeHead(403); return res.end('Forbidden');
+  }
+  fs.readFile(full, (err, content) => {
+    if (err) {
+      fs.readFile(path.join(FRONTEND, 'index.html'), (e, html) => {
+        if (e) { res.writeHead(404); res.end('Not found'); }
+        else { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); }
+      });
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': mime[path.extname(full)] || 'application/octet-stream' });
+    res.end(content);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (url.pathname === '/api/health') return json(res, 200, {
+    ok: true,
+    name: 'Yunus AI',
+    mode: process.env.OPENAI_API_KEY ? 'external-llm-ready' : 'offline-malay-ai',
+    time: new Date().toISOString()
+  });
+
+  if (url.pathname === '/api/chat' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const message = body.message || '';
+      const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
+      let reply;
+      let mode = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? 'external-llm' : 'offline-malay-ai';
+      try {
+        reply = await callExternalLLM(message, history);
+      } catch (llmErr) {
+        console.error('External LLM failed, fallback offline:', llmErr.message);
+        mode = 'offline-fallback';
+      }
+      if (!reply) reply = generateMalayAI(message, history);
+      const item = { id: crypto.randomUUID(), message, reply, mode, createdAt: new Date().toISOString() };
+      saveConversation(item);
+      return json(res, 200, { ok: true, reply, mode, conversation: item });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (url.pathname === '/api/memory' && req.method === 'GET') {
+    return json(res, 200, { ok: true, memory: loadMemory() });
+  }
+
+  return serveStatic(req, res);
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`Yunus AI berjalan di http://${HOST}:${PORT}`);
+  console.log(`Mode: ${process.env.OPENAI_API_KEY ? 'external LLM ready' : 'offline Malay AI'}`);
+});
