@@ -16,7 +16,7 @@ function add(role, text){
 }
 function render(){ chat.innerHTML=''; if(!history.length){ add('ai','Assalamualaikum. Saya Yunus AI. Tanya apa sahaja dalam Bahasa Melayu — saya sedia membantu.'); } history.forEach(m=>add(m.role,m.content)); }
 async function health(){
-  try{ const r=await fetch('/api/health'); const j=await r.json(); statusEl.textContent = j.ok ? 'Online • ' + j.mode : 'Error'; statusEl.className='status ok'; }
+  try{ const r=await fetch('/api/health'); const j=await r.json(); statusEl.textContent = j.ok ? 'Online • ' + j.mode : 'Error'; statusEl.className=j.ok ? 'status ok' : 'status bad'; }
   catch{ statusEl.textContent='Offline'; statusEl.className='status bad'; }
 }
 async function send(message){
@@ -24,11 +24,15 @@ async function send(message){
   const thinking = el('div','msg ai',''); thinking.appendChild(el('div','meta','Yunus AI')); thinking.appendChild(document.createTextNode('Sedang berfikir...')); chat.appendChild(thinking); chat.scrollTop=chat.scrollHeight;
   try{
     const r = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,history})});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const contentType = r.headers.get('content-type') || '';
+    if(!contentType.includes('application/json')) throw new Error('Respons tidak sah daripada pelayan');
     const j = await r.json();
     thinking.remove();
     if(!j.ok) throw new Error(j.error || 'Ralat tidak diketahui');
+    if(typeof j.reply !== 'string') throw new Error('Respons tidak lengkap daripada pelayan');
     history.push({role:'ai',content:j.reply}); save(); add('ai', j.reply);
-  }catch(e){ thinking.remove(); add('ai','Maaf, berlaku ralat: '+e.message); }
+  }catch(e){ thinking.remove(); const errorMsg='Maaf, berlaku ralat: '+e.message; history.push({role:'ai',content:errorMsg}); save(); add('ai',errorMsg); }
 }
 form.addEventListener('submit', e=>{ e.preventDefault(); const msg=input.value.trim(); if(!msg) return; input.value=''; input.style.height='46px'; send(msg); });
 input.addEventListener('input', ()=>{ input.style.height='46px'; input.style.height=Math.min(input.scrollHeight,160)+'px'; });

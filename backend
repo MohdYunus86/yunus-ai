@@ -5,8 +5,8 @@ const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const ROOT = path.join(__dirname, '..');
-const FRONTEND = path.join(ROOT, 'frontend');
+const ROOT = __dirname;
+const FRONTEND = ROOT;
 const DATA_DIR = path.join(ROOT, 'data');
 const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
 
@@ -26,12 +26,7 @@ const mime = {
 };
 
 function json(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-  });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data, null, 2));
 }
 
@@ -57,11 +52,15 @@ function loadMemory() {
   catch { return { conversations: [] }; }
 }
 
+let conversationWriteQueue = Promise.resolve();
 function saveConversation(item) {
-  const mem = loadMemory();
-  mem.conversations.unshift(item);
-  mem.conversations = mem.conversations.slice(0, 200);
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2));
+  conversationWriteQueue = conversationWriteQueue.then(() => {
+    const mem = loadMemory();
+    mem.conversations.unshift(item);
+    mem.conversations = mem.conversations.slice(0, 200);
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2));
+  });
+  return conversationWriteQueue;
 }
 
 const intents = [
@@ -113,6 +112,7 @@ function summarize(text) {
 async function callExternalLLM(message, history = []) {
   const apiKey = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
   if (!apiKey) return null;
+  if (typeof fetch !== 'function') return null;
   const baseURL = (process.env.OPENAI_BASE_URL || process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const model = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
   const messages = [
@@ -170,16 +170,30 @@ function draftFromPrompt(prompt) {
 }
 
 function serveStatic(req, res) {
-  let filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+  let filePath;
+  const baseURL = `http://${req.headers.host || `${HOST}:${PORT}`}`;
+  try {
+    filePath = decodeURIComponent(new URL(req.url, baseURL).pathname);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad request');
+    return;
+  }
   if (filePath === '/') filePath = '/index.html';
-  filePath = path.normalize(filePath).replace(/^([.][.][\/\\])+/, '');
-  const full = path.join(FRONTEND, filePath);
-  if (!full.startsWith(FRONTEND)) {
+  filePath = path.normalize(filePath).replace(/^[/\\]+/, '');
+  const frontendRoot = path.resolve(FRONTEND);
+  const full = path.resolve(frontendRoot, filePath);
+  if (!full.startsWith(`${frontendRoot}${path.sep}`) && full !== frontendRoot) {
     res.writeHead(403); return res.end('Forbidden');
   }
   fs.readFile(full, (err, content) => {
     if (err) {
-      fs.readFile(path.join(FRONTEND, 'index.html'), (e, html) => {
+      if (path.extname(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not found');
+        return;
+      }
+      fs.readFile(path.resolve(frontendRoot, 'index.html'), (e, html) => {
         if (e) { res.writeHead(404); res.end('Not found'); }
         else { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); }
       });
@@ -192,7 +206,7 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
 
   if (url.pathname === '/api/health') return json(res, 200, {
     ok: true,
@@ -216,7 +230,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (!reply) reply = generateMalayAI(message, history);
       const item = { id: crypto.randomUUID(), message, reply, mode, createdAt: new Date().toISOString() };
-      saveConversation(item);
+      await saveConversation(item);
       return json(res, 200, { ok: true, reply, mode, conversation: item });
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });
@@ -224,6 +238,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/memory' && req.method === 'GET') {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken || req.headers['x-admin-token'] !== adminToken) {
+      return json(res, 403, { ok: false, error: 'Forbidden' });
+    }
     return json(res, 200, { ok: true, memory: loadMemory() });
   }
 
