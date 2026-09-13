@@ -24,6 +24,9 @@ async function send(message){
   const thinking = el('div','msg ai',''); thinking.appendChild(el('div','meta','Yunus AI')); thinking.appendChild(document.createTextNode('Sedang berfikir...')); chat.appendChild(thinking); chat.scrollTop=chat.scrollHeight;
   try{
     const r = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,history})});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const contentType = r.headers.get('content-type') || '';
+    if(!contentType.includes('application/json')) throw new Error('Respons tidak sah daripada pelayan');
     const j = await r.json();
     thinking.remove();
     if(!j.ok) throw new Error(j.error || 'Ralat tidak diketahui');
