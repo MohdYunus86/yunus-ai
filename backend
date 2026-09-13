@@ -171,8 +171,9 @@ function draftFromPrompt(prompt) {
 
 function serveStatic(req, res) {
   let filePath;
+  const baseURL = `http://${req.headers.host || `${HOST}:${PORT}`}`;
   try {
-    filePath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+    filePath = decodeURIComponent(new URL(req.url, baseURL).pathname);
   } catch {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Bad request');
@@ -205,7 +206,7 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
 
   if (url.pathname === '/api/health') return json(res, 200, {
     ok: true,
@@ -237,6 +238,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/memory' && req.method === 'GET') {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken || req.headers['x-admin-token'] !== adminToken) {
+      return json(res, 403, { ok: false, error: 'Forbidden' });
+    }
     return json(res, 200, { ok: true, memory: loadMemory() });
   }
 

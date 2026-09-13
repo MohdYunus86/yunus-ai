@@ -30,6 +30,7 @@ async function send(message){
     const j = await r.json();
     thinking.remove();
     if(!j.ok) throw new Error(j.error || 'Ralat tidak diketahui');
+    if(typeof j.reply !== 'string') throw new Error('Respons tidak lengkap daripada pelayan');
     history.push({role:'ai',content:j.reply}); save(); add('ai', j.reply);
   }catch(e){ thinking.remove(); const errorMsg='Maaf, berlaku ralat: '+e.message; history.push({role:'ai',content:errorMsg}); save(); add('ai',errorMsg); }
 }
